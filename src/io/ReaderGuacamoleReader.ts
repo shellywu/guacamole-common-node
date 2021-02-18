@@ -1,7 +1,7 @@
 import { encode } from "querystring";
-import { Observable, of } from "rxjs";
-import { buffer, bufferWhen, filter, map, switchMap, window } from "rxjs/operators";
-import { GuacamoleInstruction } from "../protocol/GuacamoleInstruction";
+import { Observable, of, Subject, Subscription } from "rxjs";
+import { buffer, bufferWhen, filter, map, multicast, refCount, switchMap, tap, window } from "rxjs/operators";
+import { GuacamoleInstruction, OPCODE } from "../protocol/GuacamoleInstruction";
 import type { GuacamoleReader } from "./GuacamoleReader";
 
 
@@ -10,19 +10,25 @@ export class ReaderGuacamoleReader implements GuacamoleReader {
     private _parseStart = 0;
     private _buffer: string;
     private _bufferLength: number;
+    private _mulitcast: Subject<Uint8Array>;
+    private _autoReaderCount: Observable<Uint8Array>;
     constructor(public readonly input: Observable<Uint8Array>, bufferLength: number = 4096) {
         this._buffer = "";
         this._bufferLength = bufferLength;
+        this._mulitcast = new Subject();
+        this._autoReaderCount = input.pipe(multicast(this._mulitcast), refCount());
     }
     available() {
-        return !this.input;
+        ///error
+        return !this._autoReaderCount;
     }
     read() {
-        return this.input
+        return this._autoReaderCount
             .pipe(
                 map(d => this._parseInstructionSegment(d)),
                 filter(d => !!d),
-                map(d => d!)
+                map(d => d!),
+                tap(d=>console.debug({readData:d})),
             );
     }
     private _parseInstructionSegment(d: Uint8Array): string | undefined {
@@ -36,7 +42,6 @@ export class ReaderGuacamoleReader implements GuacamoleReader {
         }
         // Append data to buffer
         this._buffer += Buffer.from(d);
-        console.debug("ins:" + this._buffer);
         // While search is within currently received data
         // Parse instruction in buffer
         while (this._elementEnd < this._buffer.length) {
@@ -48,21 +53,21 @@ export class ReaderGuacamoleReader implements GuacamoleReader {
                 let instrucation = "";
                 // If last element, handle instruction
                 if (terminator == ";") {
-                    instrucation = this._buffer.substring(0, this._elementEnd + 1);
+                    instrucation = this._buffer.substring(this._parseStart, this._elementEnd + 1);
                 }
                 else if (terminator != ',')
                     throw new Error("Illegal terminator.");
 
                 // Start searching for length at character after
                 // element terminator
-                this._parseStart = this._elementEnd + 1;
                 if (!!instrucation) {
+                    this._parseStart = this._elementEnd + 1;
                     return instrucation;
                 }
             }
 
             // Search for end of length
-            var length_end = this._buffer.indexOf(".", this._parseStart);
+            var length_end = this._buffer.indexOf(".", this._elementEnd+1);
             if (length_end != -1) {
 
                 // Parse length
@@ -71,17 +76,17 @@ export class ReaderGuacamoleReader implements GuacamoleReader {
                     throw new Error("Non-numeric character in element length.");
 
                 // Calculate start of element
-                this._parseStart = length_end + 1;
+                //this._parseStart = length_end + 1;
 
                 // Calculate location of element terminator
-                this._elementEnd = this._parseStart + length;
+                this._elementEnd = length_end+1 + length;
 
             }
 
             // If no period yet, continue search when more data
             // is received
             else {
-                this._parseStart = this._buffer.length;
+                this._elementEnd = this._buffer.length;
                 break;
             }
 
@@ -105,10 +110,10 @@ export class ReaderGuacamoleReader implements GuacamoleReader {
             let length = parseInt(instructionBuffer.substring(elementStart, lengthEnd));
             if (isNaN(length))
                 throw new Error("length error");
-            elementStart = lengthEnd+1;
+            elementStart = lengthEnd + 1;
             elements.push(instructionBuffer.substr(elementStart, length));
             // Parse element from just after period
-            elementStart = lengthEnd + length+1;
+            elementStart = lengthEnd + length + 1;
 
             let terminator = instructionBuffer[elementStart];
 
@@ -126,7 +131,7 @@ export class ReaderGuacamoleReader implements GuacamoleReader {
 
         // Create instruction
         let instruction = new GuacamoleInstruction(
-            opcode!,
+            <OPCODE>(opcode!),
             elements
         );
 

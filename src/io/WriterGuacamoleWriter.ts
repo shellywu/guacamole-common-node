@@ -11,6 +11,7 @@ export class WriterGuacamoleWriter implements GuacamoleWriter {
         this.downCnl.next(chunk);
     }
     writeInstruction(instruction: GuacamoleInstruction): void {
+        console.debug({writeIst:instruction});
         this.downCnl.next(Buffer.from(instruction.toString()));
     }
 
