@@ -1,8 +1,9 @@
+export type OPCODE="select"|"args"|"ready"|"image"|"size"|"audio"|"video"|"connect"|"timezone";
 export class GuacamoleInstruction {
-    private _opcode: string;
+    private _opcode: OPCODE;
     private _args: Array<string>;
     private _protocolForm: string | undefined;
-    constructor(opcode: string, args: Array<string>) {
+    constructor(opcode:OPCODE, args: Array<string>) {
         this._opcode = opcode;
         this._args = args;
     }
